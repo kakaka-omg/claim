@@ -63,8 +63,8 @@
 
     <!-- 社内GAS連携エリア -->
     <div class="connection-box">
-      <div class="connection-title">🔒 社内GASの連携URL設定（1回入力すれば自動保存されます）</div>
-      <input type="text" id="gas-url" placeholder="GASのデプロイURL（https://script.google.com/macros/s/.../exec）を貼り付けてください">
+      <div class="connection-title">🔒 社内GASの連携URL設定（自動補正機能つき）</div>
+      <input type="text" id="gas-url" placeholder="GASのデプロイURLを貼り付けてください">
     </div>
 
     <!-- 会話履歴 -->
@@ -90,7 +90,6 @@
       const chatHistory = document.getElementById('chat-history');
       const gasUrlInput = document.getElementById('gas-url');
 
-      // 社内共通の合言葉（GAS側の合言葉と完全一致）
       const COMPANY_SECRET_KEY = "HOSHINO_CLAIM_SECURE_2026";
 
       gasUrlInput.value = localStorage.getItem('claim_gas_url') || '';
@@ -165,12 +164,9 @@
           statusMsg.textContent = '社内GASへ通信中 ＆ 客（AI）の返答を受信中...';
           micBtn.disabled = true;
 
-          // 社内GASと通信（合言葉を添えて送信）
           const aiReply = await sendToSecureGAS(userText);
 
           addCustomerMessage(aiReply);
-          
-          // ④ 客の怒声をスピーカーから再生
           speakText(aiReply);
 
           statusMsg.textContent = '客が言い返してきました。続けてマイクで対応してください！';
@@ -204,21 +200,24 @@
         window.scrollTo(0, document.body.scrollHeight);
       }
 
+      // 社内限定GASと通信する関数（URLの自動補正付き）
       async function sendToSecureGAS(speechText) {
-        const url = gasUrlInput.value.trim();
-        try {
-          // 合言葉（secretKey）を添えてPOST送信
-          const payload = {
-            secretKey: COMPANY_SECRET_KEY,
-            text: speechText
-          };
+        let baseUrl = gasUrlInput.value.trim();
 
-          const response = await fetch(url, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
-          });
+        // 【自動補正1】組織パス（/a/macros/hoshinoresorts.com 等）が入っていれば自動で除去
+        baseUrl = baseUrl.replace(/\/a\/macros\/[^\/]+/, '');
+
+        // 【自動補正2】末尾の /exec が抜けていれば自動補完
+        if (!baseUrl.endsWith('/exec')) {
+          baseUrl = baseUrl.replace(/\/+$/, '') + '/exec';
+        }
+
+        try {
+          const targetUrl = baseUrl + '?secretKey=' + encodeURIComponent(COMPANY_SECRET_KEY) + '&text=' + encodeURIComponent(speechText);
+
+          const response = await fetch(targetUrl);
           const result = await response.json();
+
           if (result.status === "success") {
             return result.reply;
           } else {
@@ -236,8 +235,8 @@
         const cleanText = text.replace(/[「」『』]/g, '');
         const uttr = new SpeechSynthesisUtterance(cleanText);
         uttr.lang = 'ja-JP';
-        uttr.rate = 1.15; // 怒っているので早口
-        uttr.pitch = 0.85; // 怒声らしく少し低め
+        uttr.rate = 1.15;
+        uttr.pitch = 0.85;
         window.speechSynthesis.speak(uttr);
       }
 
