@@ -16,7 +16,6 @@
       h1 { text-align: center; margin-bottom: 4px; color: #1a1a1a; }
       p.subtitle { text-align: center; color: #666; font-size: 14px; margin-bottom: 16px; }
       
-      /* 社内GAS連携エリア */
       .connection-box {
         background: #e8f0fe;
         border: 2px solid #4285f4;
@@ -40,7 +39,6 @@
         font-size: 13px;
       }
 
-      /* 会話タイムライン表示 */
       #chat-history { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
       .bubble { padding: 16px 20px; border-radius: 12px; line-height: 1.6; max-width: 82%; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
       .customer-bubble { align-self: flex-start; background-color: #ffebee; border-left: 6px solid #d32f2f; }
@@ -50,7 +48,6 @@
       .staff-bubble .speaker { font-weight: bold; color: #1565c0; font-size: 13px; margin-bottom: 4px; text-align: right; }
       .staff-bubble .text { font-size: 16px; color: #212121; }
 
-      /* 操作パネル */
       .control-panel { text-align: center; background: white; padding: 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
       #mic-btn { padding: 18px 40px; font-size: 18px; font-weight: bold; background-color: #1a73e8; color: white; border: none; border-radius: 40px; cursor: pointer; transition: all 0.2s ease; }
       #mic-btn:hover { background-color: #1557b0; }
@@ -67,7 +64,7 @@
     <!-- 社内GAS連携エリア -->
     <div class="connection-box">
       <div class="connection-title">🔒 社内GASの連携URL設定（1回入力すれば自動保存されます）</div>
-      <input type="text" id="gas-url" placeholder="GASのデプロイURL（https://script.google.com/a/macros/.../exec）を貼り付けてください">
+      <input type="text" id="gas-url" placeholder="GASのデプロイURL（https://script.google.com/macros/s/.../exec）を貼り付けてください">
     </div>
 
     <!-- 会話履歴 -->
@@ -93,7 +90,9 @@
       const chatHistory = document.getElementById('chat-history');
       const gasUrlInput = document.getElementById('gas-url');
 
-      // 前回のURL入力をブラウザに自動記憶
+      // 社内共通の合言葉（GAS側の合言葉と完全一致）
+      const COMPANY_SECRET_KEY = "HOSHINO_CLAIM_SECURE_2026";
+
       gasUrlInput.value = localStorage.getItem('claim_gas_url') || '';
       gasUrlInput.addEventListener('change', () => {
         localStorage.setItem('claim_gas_url', gasUrlInput.value.trim());
@@ -113,7 +112,7 @@
         micBtn.addEventListener('click', () => {
           const gasUrl = gasUrlInput.value.trim();
           if (!gasUrl) {
-            alert('上部の入力欄に、GASのデプロイURL（末尾が /exec のもの）を貼り付けてください。');
+            alert('上部の入力欄に、GASのデプロイURLを貼り付けてください。');
             gasUrlInput.focus();
             return;
           }
@@ -139,7 +138,6 @@
           statusMsg.textContent = '聞き取り中：マイクに向かって返答してください';
         };
 
-        // 音声認識（二重カウントを完全に防ぐ修正ロジック）
         recognition.onresult = (event) => {
           let fullText = '';
           for (let i = 0; i < event.results.length; i++) {
@@ -162,18 +160,17 @@
             return;
           }
 
-          // スタッフの発言を表示
           addStaffMessage(userText);
 
-          statusMsg.textContent = '社内GASへ通信中 ＆ 客（AI）の返答を生成中...';
+          statusMsg.textContent = '社内GASへ通信中 ＆ 客（AI）の返答を受信中...';
           micBtn.disabled = true;
 
-          // 社内GASに送信して怒り返答を取得
+          // 社内GASと通信（合言葉を添えて送信）
           const aiReply = await sendToSecureGAS(userText);
 
           addCustomerMessage(aiReply);
           
-          // ④ AIが声で怒鳴り返す（音声読み上げ）
+          // ④ 客の怒声をスピーカーから再生
           speakText(aiReply);
 
           statusMsg.textContent = '客が言い返してきました。続けてマイクで対応してください！';
@@ -207,38 +204,40 @@
         window.scrollTo(0, document.body.scrollHeight);
       }
 
-      // 社内限定GASと通信する関数
       async function sendToSecureGAS(speechText) {
         const url = gasUrlInput.value.trim();
         try {
+          // 合言葉（secretKey）を添えてPOST送信
+          const payload = {
+            secretKey: COMPANY_SECRET_KEY,
+            text: speechText
+          };
+
           const response = await fetch(url, {
             method: 'POST',
-            body: JSON.stringify({ text: speechText }),
+            body: JSON.stringify(payload),
             headers: { 'Content-Type': 'text/plain;charset=utf-8' }
           });
           const result = await response.json();
           if (result.status === "success") {
             return result.reply;
           } else {
-            return "【エラー】GAS応答失敗: " + (result.message || '');
+            return "【認証エラー】" + (result.message || '');
           }
         } catch (e) {
           console.error(e);
-          return "【通信エラー】GASのURLが正しいか、社内Googleアカウントでログインしているか確認してください。";
+          return "【通信エラー】GAS側のURLが最新のものか確認してください。";
         }
       }
 
-      // ④ ブラウザ音声合成で客の怒声を再生する
       function speakText(text) {
         if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel(); // 前の音声を止める
-        
-        // 鉤括弧などを除去してセリフだけ読む
+        window.speechSynthesis.cancel();
         const cleanText = text.replace(/[「」『』]/g, '');
         const uttr = new SpeechSynthesisUtterance(cleanText);
         uttr.lang = 'ja-JP';
-        uttr.rate = 1.15; // 怒っているので少し早口
-        uttr.pitch = 0.85; // 怒鳴り声らしく少し低めのトーン
+        uttr.rate = 1.15; // 怒っているので早口
+        uttr.pitch = 0.85; // 怒声らしく少し低め
         window.speechSynthesis.speak(uttr);
       }
 
